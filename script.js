@@ -145,11 +145,32 @@ function buildCurrencyURL(leagueId) {
   return `${API_BASE}/poe2/api/economy/exchange/current/overview?${params}`;
 }
 
-// Build the item API URL through the Worker.
+// PoE 2 uses plural category values.
+const POE2_ITEM_TYPES = {
+  UniqueWeapon: "UniqueWeapons",
+  UniqueArmour: "UniqueArmours",
+  UniqueAccessory: "UniqueAccessories",
+  UniqueFlask: "UniqueFlasks",
+  UniqueJewel: "UniqueJewels",
+  UniqueRelic: "UniqueSanctumRelics",
+  UniqueWeapons: "UniqueWeapons",
+  UniqueArmours: "UniqueArmours",
+  UniqueAccessories: "UniqueAccessories",
+  UniqueFlasks: "UniqueFlasks",
+  UniqueCharms: "UniqueCharms",
+  UniqueJewels: "UniqueJewels",
+  UniqueSanctumRelics: "UniqueSanctumRelics",
+  UniqueTablets: "UniqueTablets",
+  PrecursorTablets: "PrecursorTablets"
+};
+
+// Build the item API URL through the Worker using a valid PoE 2 category.
 function buildItemURL(leagueId, itemType) {
+  const poe2ItemType = POE2_ITEM_TYPES[itemType] || itemType;
+
   const params = new URLSearchParams({
     league: leagueId,
-    type: itemType
+    type: poe2ItemType
   });
 
   return `${API_BASE}/poe2/api/economy/stash/current/item/overview?${params}`;
@@ -161,7 +182,33 @@ function loadCurrencies(leagueId) {
 
   return fetchJSON(buildCurrencyURL(leagueId))
     .then(data => {
-      currencyData = getEntries(data);
+      // Match currency pricing information with its metadata.
+      const currencyMetadata = Array.isArray(data?.core?.items)
+        ? data.core.items
+        : [];
+
+      const metadataById = new Map(
+        currencyMetadata.map(item => [String(item.id), item])
+      );
+
+      currencyData = getEntries(data).map(line => {
+        const metadata = metadataById.get(String(line.id)) || {};
+
+        return {
+          ...metadata,
+          ...line,
+          name:
+            line.name ||
+            metadata.name ||
+            metadata.currencyTypeName ||
+            "Unknown",
+          icon:
+            line.icon ||
+            metadata.icon ||
+            metadata.image ||
+            ""
+        };
+      });
 
       elements.summaryCurrencies.textContent = formatNumber(
         currencyData.length,
