@@ -32,7 +32,7 @@ let currencyData = [];
 let itemData = [];
 let toastTimer;
 
-// Fetch JSON and give a useful error if the server returns an unsuccessful status.
+// Fetch JSON and handle unsuccessful responses.
 const fetchJSON = (url) =>
   fetch(url, {
     headers: {
@@ -42,14 +42,16 @@ const fetchJSON = (url) =>
     if (!response.ok) {
       throw new Error(`Request failed (${response.status}).`);
     }
+
     return response.json();
   });
 
-// Normalize API response shapes without assuming every optional property exists.
+// Get entries from different API response formats.
 const getEntries = (data) => {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.lines)) return data.lines;
   if (Array.isArray(data?.results)) return data.results;
+
   return [];
 };
 
@@ -62,12 +64,24 @@ const getIcon = (item) =>
 const getName = (item) =>
   item?.name || item?.currencyTypeName || item?.baseType || "Unknown";
 
-const getValue = (item) =>
-  Number(item?.primaryValue ?? item?.chaosValue ?? item?.value ?? 0);
+const getValue = (item) => {
+  const value =
+    item?.primaryValue ??
+    item?.chaosValue ??
+    item?.value;
+
+  return value === undefined || value === null
+    ? null
+    : Number(value);
+};
 
 const getVolume = (item) =>
-  item?.volumePrimaryValue ?? item?.listingCount ?? item?.count ?? null;
+  item?.volumePrimaryValue ??
+  item?.listingCount ??
+  item?.count ??
+  null;
 
+// Display a temporary notification.
 function showToast(message) {
   elements.toast.textContent = message;
   elements.toast.classList.add("show");
@@ -79,6 +93,7 @@ function showToast(message) {
   }, 2600);
 }
 
+// Display loading or error messages.
 function showPanel(container, message, isError = false) {
   container.innerHTML = `
     <div class="${isError ? "error-panel" : "loading-panel"}">
@@ -87,6 +102,7 @@ function showPanel(container, message, isError = false) {
   `;
 }
 
+// Escape HTML to safely display API data.
 function escapeHTML(value = "") {
   return String(value).replace(/[&<>"']/g, character => ({
     "&": "&amp;",
@@ -97,6 +113,7 @@ function escapeHTML(value = "") {
   })[character]);
 }
 
+// Format numbers.
 function formatNumber(value, maximumFractionDigits = 2) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits
@@ -145,32 +162,11 @@ function buildCurrencyURL(leagueId) {
   return `${API_BASE}/poe2/api/economy/exchange/current/overview?${params}`;
 }
 
-// PoE 2 uses plural category values.
-const POE2_ITEM_TYPES = {
-  UniqueWeapon: "UniqueWeapons",
-  UniqueArmour: "UniqueArmours",
-  UniqueAccessory: "UniqueAccessories",
-  UniqueFlask: "UniqueFlasks",
-  UniqueJewel: "UniqueJewels",
-  UniqueRelic: "UniqueSanctumRelics",
-  UniqueWeapons: "UniqueWeapons",
-  UniqueArmours: "UniqueArmours",
-  UniqueAccessories: "UniqueAccessories",
-  UniqueFlasks: "UniqueFlasks",
-  UniqueCharms: "UniqueCharms",
-  UniqueJewels: "UniqueJewels",
-  UniqueSanctumRelics: "UniqueSanctumRelics",
-  UniqueTablets: "UniqueTablets",
-  PrecursorTablets: "PrecursorTablets"
-};
-
-// Build the item API URL through the Worker using a valid PoE 2 category.
+// Build the item API URL through the Worker.
 function buildItemURL(leagueId, itemType) {
-  const poe2ItemType = POE2_ITEM_TYPES[itemType] || itemType;
-
   const params = new URLSearchParams({
     league: leagueId,
-    type: poe2ItemType
+    type: itemType
   });
 
   return `${API_BASE}/poe2/api/economy/stash/current/item/overview?${params}`;
@@ -182,33 +178,21 @@ function loadCurrencies(leagueId) {
 
   return fetchJSON(buildCurrencyURL(leagueId))
     .then(data => {
-      // Match currency pricing information with its metadata.
-      const currencyMetadata = Array.isArray(data?.core?.items)
-        ? data.core.items
-        : [];
 
-      const metadataById = new Map(
-        currencyMetadata.map(item => [String(item.id), item])
-      );
+      // Currency names and images are stored in core.items.
+      // data.lines contains item listings, not currency metadata.
+      const currencyMetadata = data?.core?.items || [];
 
-      currencyData = getEntries(data).map(line => {
-        const metadata = metadataById.get(String(line.id)) || {};
+      currencyData = currencyMetadata.map(currency => ({
+        id: currency.id,
+        name: currency.name,
+        image: currency.image,
+        detailsId: currency.detailsId,
 
-        return {
-          ...metadata,
-          ...line,
-          name:
-            line.name ||
-            metadata.name ||
-            metadata.currencyTypeName ||
-            "Unknown",
-          icon:
-            line.icon ||
-            metadata.icon ||
-            metadata.image ||
-            ""
-        };
-      });
+        // Keep prices unavailable until a confirmed price field exists.
+        primaryValue: null,
+        volumePrimaryValue: null
+      }));
 
       elements.summaryCurrencies.textContent = formatNumber(
         currencyData.length,
@@ -224,7 +208,7 @@ function loadCurrencies(leagueId) {
     .catch(error => {
       showPanel(
         elements.currencyGrid,
-        `Unable to load currency data: ${escapeHTML(error.message)} Check the API documentation or browser console.`,
+        `Unable to load currency data: ${escapeHTML(error.message)}`,
         true
       );
 
@@ -252,7 +236,7 @@ function loadItems(leagueId, itemType = elements.itemType.value) {
     .catch(error => {
       showPanel(
         elements.itemGrid,
-        `Unable to load item data: ${escapeHTML(error.message)} Check the API documentation or browser console.`,
+        `Unable to load item data: ${escapeHTML(error.message)}`,
         true
       );
 
@@ -275,9 +259,12 @@ function renderCurrencies() {
       return getName(a).localeCompare(getName(b));
     }
 
+    const valueA = getValue(a) ?? 0;
+    const valueB = getValue(b) ?? 0;
+
     return sortMode === "value-asc"
-      ? getValue(a) - getValue(b)
-      : getValue(b) - getValue(a);
+      ? valueA - valueB
+      : valueB - valueA;
   });
 
   if (!visible.length) {
@@ -303,14 +290,18 @@ function renderCurrencies() {
           <div class="currency-name">${escapeHTML(name)}</div>
 
           <div class="currency-value">
-            ${formatNumber(value)} chaos value
+            ${
+              value !== null && Number.isFinite(value)
+                ? `${formatNumber(value)} chaos value`
+                : "Price unavailable"
+            }
           </div>
 
           <div class="currency-volume">
             ${
               volume !== null
                 ? `Market volume: ${formatNumber(Number(volume))}`
-                : "Current market listing"
+                : "Currency market data"
             }
           </div>
         </div>
@@ -359,7 +350,11 @@ function renderItems() {
           </div>
 
           <div class="item-price">
-            ${formatNumber(price)} chaos value
+            ${
+              price !== null && Number.isFinite(price)
+                ? `${formatNumber(price)} chaos value`
+                : "Price unavailable"
+            }
           </div>
         </div>
       </article>
@@ -394,13 +389,8 @@ function populateCurrencySelects() {
   `;
 
   if (currencyData.length > 1) {
-    elements.from.value = currencyData[0]
-      ? getName(currencyData[0])
-      : "";
-
-    elements.to.value = currencyData[1]
-      ? getName(currencyData[1])
-      : "";
+    elements.from.value = getName(currencyData[0]);
+    elements.to.value = getName(currencyData[1]);
   }
 
   if ([...elements.from.options].some(option => option.value === previousFrom)) {
@@ -424,19 +414,23 @@ function updateCalculator() {
     getName(item) === elements.to.value
   );
 
+  const fromValue = fromItem ? getValue(fromItem) : null;
+  const toValue = toItem ? getValue(toItem) : null;
+
   if (
     !Number.isFinite(amount) ||
     amount < 0 ||
-    !fromItem ||
-    !toItem ||
-    getValue(toItem) <= 0
+    fromValue === null ||
+    toValue === null ||
+    !Number.isFinite(fromValue) ||
+    !Number.isFinite(toValue) ||
+    toValue <= 0
   ) {
     elements.result.textContent = "—";
     return;
   }
 
-  // Values are normalized against the API's common value field.
-  const converted = amount * getValue(fromItem) / getValue(toItem);
+  const converted = amount * fromValue / toValue;
 
   elements.result.textContent = formatNumber(converted, 4);
 }
