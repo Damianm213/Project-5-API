@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Wraeclast Market — a Path of Exile 2 economy tracker.">
+  <title>Wraeclast Market | Path of Exile 2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Popmotion 8.1.24, matching the version supplied in the assignment -->
+  <script src="https://unpkg.com/popmotion@8.1.24/dist/popmotion.global.min.js" defer></script>
+  <script src="js/script.js" defer></script>
+  <script src="js/animation.js" defer></script>
+</head>
+<body>
+  <div class="site-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Wraeclast Market home">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span>WRAECLAST <em>MARKET</em></span>
+      </a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a class="nav-link active" href="#overview">Overview</a>
+        <a class="nav-link" href="#currency">Currency</a>
+        <a class="nav-link" href="#items">Unique items</a>
+      </nav>
+      <div class="league-control">
+        <label for="league-select">League</label>
+        <select id="league-select" aria-label="Select Path of Exile 2 league">
+          <option value="">Loading leagues…</option>
+        </select>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" id="overview">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="status-dot"></span> PATH OF EXILE 2 · MARKET INTELLIGENCE</p>
+          <h1>Know the value<br><span>of your haul.</span></h1>
+          <p class="hero-description">A market overview for the currencies and unique items moving through Wraeclast.</p>
+          <a class="primary-button" href="#currency">Explore the market <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="sigil sigil-one"></div>
+          <div class="sigil sigil-two"></div>
+          <div class="hero-orb">✦</div>
+          <div class="hero-caption">THE<br>EXCHANGE</div>
+        </div>
+      </section>
+
+      <section class="market-strip" aria-label="Market summary">
+        <div class="market-stat">
+          <span class="stat-label">Selected league</span>
+          <strong id="summary-league">—</strong>
+        </div>
+        <div class="market-stat">
+          <span class="stat-label">Currency listings</span>
+          <strong id="summary-currencies">—</strong>
+        </div>
+        <div class="market-stat">
+          <span class="stat-label">Unique item listings</span>
+          <strong id="summary-items">—</strong>
+        </div>
+        <div class="market-stat">
+          <span class="stat-label">Last updated</span>
+          <strong id="last-updated">Waiting for data</strong>
+        </div>
+      </section>
+
+      <section class="content-section" id="currency">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">THE EXCHANGE</p>
+            <h2>Currency market</h2>
+            <p class="section-description">Browse current exchange values and find the currencies you need.</p>
+          </div>
+          <button class="text-button" id="refresh-button" type="button">↻ Refresh data</button>
+        </div>
+
+        <div class="toolbar">
+          <label class="search-box">
+            <span aria-hidden="true">⌕</span>
+            <input id="currency-search" type="search" placeholder="Search currencies…" autocomplete="off">
+          </label>
+          <label class="filter-label" for="currency-sort">Sort by</label>
+          <select id="currency-sort">
+            <option value="value-desc">Value: high to low</option>
+            <option value="value-asc">Value: low to high</option>
+            <option value="name-asc">Name: A–Z</option>
+          </select>
+        </div>
+
+        <div id="currency-grid" class="currency-grid" aria-live="polite">
+          <div class="loading-panel">Consulting the market records…</div>
+        </div>
+        <p class="data-note" id="currency-note">Market data is supplied by poe.ninja. Values and available fields depend on the selected league and API response.</p>
+      </section>
+
+      <section class="content-section calculator-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">QUICK CALCULATION</p>
+            <h2>Currency calculator</h2>
+            <p class="section-description">Estimate an exchange using the displayed market value.</p>
+          </div>
+        </div>
+        <div class="calculator-panel">
+          <div class="calculator-field">
+            <label for="amount-input">Amount</label>
+            <input id="amount-input" type="number" min="0" step="any" value="1">
+          </div>
+          <div class="calculator-field">
+            <label for="from-currency">From</label>
+            <select id="from-currency"><option value="">Choose currency</option></select>
+          </div>
+          <div class="swap-mark" aria-hidden="true">⇄</div>
+          <div class="calculator-field">
+            <label for="to-currency">To</label>
+            <select id="to-currency"><option value="">Choose currency</option></select>
+          </div>
+          <div class="calculator-result">
+            <span class="stat-label">Estimated amount</span>
+            <strong id="conversion-result">—</strong>
+          </div>
+        </div>
+        <p class="data-note">This is an estimate based on API market values, not a guaranteed player-to-player trade offer.</p>
+      </section>
+
+      <section class="content-section" id="items">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">RARE FINDS</p>
+            <h2>Unique items</h2>
+            <p class="section-description">A preview of unique-item market listings.</p>
+          </div>
+        </div>
+        <div class="toolbar">
+          <label class="search-box">
+            <span aria-hidden="true">⌕</span>
+            <input id="item-search" type="search" placeholder="Search unique items…" autocomplete="off">
+          </label>
+          <label class="filter-label" for="item-type">Category</label>
+          <select id="item-type">
+            <option value="UniqueWeapon">Weapons</option>
+            <option value="UniqueArmour">Armour</option>
+            <option value="UniqueAccessory">Accessories</option>
+            <option value="UniqueFlask">Flasks</option>
+            <option value="UniqueJewel">Jewels</option>
+          </select>
+        </div>
+        <div id="item-grid" class="item-grid" aria-live="polite">
+          <div class="loading-panel">Gathering unique items…</div>
+        </div>
+        <p class="data-note" id="item-note">Item availability and categories depend on the league and poe.ninja response.</p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="brand footer-brand"><span class="brand-mark" aria-hidden="true">✦</span><span>WRAECLAST <em>MARKET</em></span></div>
+      <p>Fan-made educational project. Not affiliated with Grinding Gear Games or Path of Exile.</p>
+      <p>Market data attribution: <a href="https://poe.ninja/" target="_blank" rel="noopener noreferrer">poe.ninja</a>.</p>
+    </footer>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
