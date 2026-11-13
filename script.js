@@ -1,7 +1,6 @@
 /*
  * Wraeclast Market
- * Vanilla JavaScript ES6 + Fetch API.
- * Uses a Cloudflare Worker to retrieve Path of Exile 2 market data.
+ * Path of Exile 2 market tracker
  */
 
 const API_BASE = "https://wraeclast-market-api.daawesomeone1.workers.dev";
@@ -32,56 +31,40 @@ let currencyData = [];
 let itemData = [];
 let toastTimer;
 
-// Fetch JSON and handle unsuccessful responses.
+// Fetch API data.
 const fetchJSON = (url) =>
   fetch(url, {
-    headers: {
-      "Accept": "application/json"
-    }
+    headers: { Accept: "application/json" }
   }).then(response => {
     if (!response.ok) {
       throw new Error(`Request failed (${response.status}).`);
     }
-
     return response.json();
   });
 
-// Get entries from different API response formats.
+// Get entries from API responses.
 const getEntries = (data) => {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.lines)) return data.lines;
   if (Array.isArray(data?.results)) return data.results;
-
   return [];
 };
 
 const getLeagueName = (league) =>
   league?.name || league?.id || league?.league || "Unknown league";
 
-const getIcon = (item) =>
-  item?.icon || item?.image || "";
+const getIcon = (item) => item?.icon || item?.image || "";
 
 const getName = (item) =>
   item?.name || item?.currencyTypeName || item?.baseType || "Unknown";
 
-const getValue = (item) => {
-  const value =
-    item?.primaryValue ??
-    item?.chaosValue ??
-    item?.value;
-
-  return value === undefined || value === null
-    ? null
-    : Number(value);
-};
+const getValue = (item) =>
+  Number(item?.primaryValue ?? item?.chaosValue ?? item?.value ?? 0);
 
 const getVolume = (item) =>
-  item?.volumePrimaryValue ??
-  item?.listingCount ??
-  item?.count ??
-  null;
+  item?.volumePrimaryValue ?? item?.listingCount ?? item?.count ?? null;
 
-// Display a temporary notification.
+// Display notifications.
 function showToast(message) {
   elements.toast.textContent = message;
   elements.toast.classList.add("show");
@@ -93,7 +76,7 @@ function showToast(message) {
   }, 2600);
 }
 
-// Display loading or error messages.
+// Display loading and error messages.
 function showPanel(container, message, isError = false) {
   container.innerHTML = `
     <div class="${isError ? "error-panel" : "loading-panel"}">
@@ -102,7 +85,7 @@ function showPanel(container, message, isError = false) {
   `;
 }
 
-// Escape HTML to safely display API data.
+// Escape HTML.
 function escapeHTML(value = "") {
   return String(value).replace(/[&<>"']/g, character => ({
     "&": "&amp;",
@@ -145,14 +128,13 @@ function loadLeagues() {
       }).join("");
 
       const selected = leagueList[0];
-
       elements.summaryLeague.textContent = getLeagueName(selected);
 
       return selected;
     });
 }
 
-// Build the currency API URL through the Worker.
+// Build currency API URL.
 function buildCurrencyURL(leagueId) {
   const params = new URLSearchParams({
     league: leagueId,
@@ -162,7 +144,7 @@ function buildCurrencyURL(leagueId) {
   return `${API_BASE}/poe2/api/economy/exchange/current/overview?${params}`;
 }
 
-// Build the item API URL through the Worker.
+// Build item API URL.
 function buildItemURL(leagueId, itemType) {
   const params = new URLSearchParams({
     league: leagueId,
@@ -172,27 +154,52 @@ function buildItemURL(leagueId, itemType) {
   return `${API_BASE}/poe2/api/economy/stash/current/item/overview?${params}`;
 }
 
-// Load currency data.
+// Load currencies.
 function loadCurrencies(leagueId) {
   showPanel(elements.currencyGrid, "Consulting the market records…");
 
   return fetchJSON(buildCurrencyURL(leagueId))
     .then(data => {
+      const core = data?.core || {};
+      const currencyItems = core.items || [];
+      const rates = core.rates || {};
 
-      // Currency names and images are stored in core.items.
-      // data.lines contains item listings, not currency metadata.
-      const currencyMetadata = data?.core?.items || [];
+      const primary = core.primary;
+      const secondary = core.secondary;
 
-      currencyData = currencyMetadata.map(currency => ({
-        id: currency.id,
-        name: currency.name,
-        image: currency.image,
-        detailsId: currency.detailsId,
+      /*
+       * The API's core.items contains currency names and images.
+       * The API's core.rates contains exchange-rate information.
+       * The lines array contains item listings, not currency metadata.
+       */
 
-        // Keep prices unavailable until a confirmed price field exists.
-        primaryValue: null,
-        volumePrimaryValue: null
-      }));
+      currencyData = currencyItems.map(currency => {
+        let chaosValue = null;
+
+        if (currency.id === secondary) {
+          chaosValue = 1;
+        } else if (
+          currency.id === primary &&
+          Number(rates[secondary]) > 0
+        ) {
+          chaosValue = Number(rates[secondary]);
+        } else if (
+          Number(rates[currency.id]) > 0 &&
+          Number(rates[secondary]) > 0
+        ) {
+          chaosValue =
+            Number(rates[secondary]) /
+            Number(rates[currency.id]);
+        }
+
+        return {
+          ...currency,
+          name: currency.name,
+          icon: currency.image,
+          primaryValue: chaosValue,
+          volumePrimaryValue: null
+        };
+      });
 
       elements.summaryCurrencies.textContent = formatNumber(
         currencyData.length,
@@ -216,7 +223,7 @@ function loadCurrencies(leagueId) {
     });
 }
 
-// Load item data.
+// Load items.
 function loadItems(leagueId, itemType = elements.itemType.value) {
   showPanel(elements.itemGrid, "Gathering unique items…");
 
@@ -259,12 +266,9 @@ function renderCurrencies() {
       return getName(a).localeCompare(getName(b));
     }
 
-    const valueA = getValue(a) ?? 0;
-    const valueB = getValue(b) ?? 0;
-
     return sortMode === "value-asc"
-      ? valueA - valueB
-      : valueB - valueA;
+      ? (getValue(a) || 0) - (getValue(b) || 0)
+      : (getValue(b) || 0) - (getValue(a) || 0);
   });
 
   if (!visible.length) {
@@ -276,13 +280,12 @@ function renderCurrencies() {
     const name = getName(item);
     const icon = getIcon(item);
     const value = getValue(item);
-    const volume = getVolume(item);
 
     return `
       <article class="currency-card" data-spring-card>
         ${
           icon
-            ? `<img class="currency-icon" src="${escapeHTML(icon)}" alt="" loading="lazy">`
+            ? `<img class="currency-icon" src="${escapeHTML(icon.startsWith("/") ? "https://poe.ninja" + icon : icon)}" alt="" loading="lazy">`
             : `<span class="currency-icon currency-placeholder" aria-hidden="true">✦</span>`
         }
 
@@ -291,18 +294,14 @@ function renderCurrencies() {
 
           <div class="currency-value">
             ${
-              value !== null && Number.isFinite(value)
+              Number.isFinite(value) && value > 0
                 ? `${formatNumber(value)} chaos value`
                 : "Price unavailable"
             }
           </div>
 
           <div class="currency-volume">
-            ${
-              volume !== null
-                ? `Market volume: ${formatNumber(Number(volume))}`
-                : "Currency market data"
-            }
+            Market exchange rate
           </div>
         </div>
       </article>
@@ -350,11 +349,7 @@ function renderItems() {
           </div>
 
           <div class="item-price">
-            ${
-              price !== null && Number.isFinite(price)
-                ? `${formatNumber(price)} chaos value`
-                : "Price unavailable"
-            }
+            ${formatNumber(price)} chaos value
           </div>
         </div>
       </article>
@@ -364,8 +359,11 @@ function renderItems() {
   document.dispatchEvent(new CustomEvent("currency-cards-rendered"));
 }
 
-// Populate currency dropdowns for the calculator.
+// Populate calculator dropdowns.
 function populateCurrencySelects() {
+  const previousFrom = elements.from.value;
+  const previousTo = elements.to.value;
+
   const options = [...currencyData]
     .sort((a, b) => getName(a).localeCompare(getName(b)))
     .map(item => `
@@ -374,9 +372,6 @@ function populateCurrencySelects() {
       </option>
     `)
     .join("");
-
-  const previousFrom = elements.from.value;
-  const previousTo = elements.to.value;
 
   elements.from.innerHTML = `
     <option value="">Choose currency</option>
@@ -402,7 +397,7 @@ function populateCurrencySelects() {
   }
 }
 
-// Calculate estimated currency conversion.
+// Calculate currency conversion.
 function updateCalculator() {
   const amount = Number(elements.amount.value);
 
@@ -420,10 +415,9 @@ function updateCalculator() {
   if (
     !Number.isFinite(amount) ||
     amount < 0 ||
-    fromValue === null ||
-    toValue === null ||
     !Number.isFinite(fromValue) ||
     !Number.isFinite(toValue) ||
+    fromValue <= 0 ||
     toValue <= 0
   ) {
     elements.result.textContent = "—";
@@ -435,7 +429,7 @@ function updateCalculator() {
   elements.result.textContent = formatNumber(converted, 4);
 }
 
-// Refresh all market data.
+// Refresh market data.
 function refreshMarket() {
   const leagueId = elements.league.value;
 
@@ -461,7 +455,7 @@ function refreshMarket() {
   });
 }
 
-// Initialize the application.
+// Initialize application.
 function initialize() {
   loadLeagues()
     .then(league => {
@@ -498,9 +492,7 @@ function initialize() {
 
 // Event listeners.
 elements.currencySearch.addEventListener("input", renderCurrencies);
-
 elements.currencySort.addEventListener("change", renderCurrencies);
-
 elements.itemSearch.addEventListener("input", renderItems);
 
 elements.itemType.addEventListener("change", () => {
@@ -510,7 +502,6 @@ elements.itemType.addEventListener("change", () => {
 });
 
 elements.league.addEventListener("change", refreshMarket);
-
 elements.refresh.addEventListener("click", refreshMarket);
 
 [elements.amount, elements.from, elements.to].forEach(control => {
@@ -518,5 +509,5 @@ elements.refresh.addEventListener("click", refreshMarket);
   control.addEventListener("change", updateCalculator);
 });
 
-// Start the application.
+// Start application.
 initialize();
