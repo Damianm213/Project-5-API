@@ -1,12 +1,11 @@
 /*
  * Wraeclast Market
- * Path of Exile 2 Economy Tracker
- * API: poe.ninja through Cloudflare Worker
- * JavaScript: ES6 + Fetch API
+ * Vanilla JavaScript ES6 + Fetch API.
+ * Uses a Cloudflare Worker to retrieve Path of Exile 2 market data.
  */
 
 const API_BASE = "https://wraeclast-market-api.daawesomeone1.workers.dev";
-const API_ROOT = `${API_BASE}/poe2/api/economy`;
+const LEAGUES_URL = `${API_BASE}/poe2/api/economy/leagues`;
 
 const elements = {
   league: document.querySelector("#league-select"),
@@ -31,29 +30,45 @@ const elements = {
 let leagueList = [];
 let currencyData = [];
 let itemData = [];
-let currencyUnit = "primary currency";
 let toastTimer;
 
-// Fetch JSON from the API and handle unsuccessful responses.
-function fetchJSON(url) {
-  return fetch(url, {
-    method: "GET",
+// Fetch JSON and give a useful error if the server returns an unsuccessful status.
+const fetchJSON = (url) =>
+  fetch(url, {
     headers: {
       "Accept": "application/json"
     }
   }).then(response => {
     if (!response.ok) {
-      throw new Error(`API request failed (${response.status}).`);
+      throw new Error(`Request failed (${response.status}).`);
     }
-
     return response.json();
   });
-}
 
-// Display a temporary notification.
+// Normalize API response shapes without assuming every optional property exists.
+const getEntries = (data) => {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.lines)) return data.lines;
+  if (Array.isArray(data?.results)) return data.results;
+  return [];
+};
+
+const getLeagueName = (league) =>
+  league?.name || league?.id || league?.league || "Unknown league";
+
+const getIcon = (item) =>
+  item?.icon || item?.image || "";
+
+const getName = (item) =>
+  item?.name || item?.currencyTypeName || item?.baseType || "Unknown";
+
+const getValue = (item) =>
+  Number(item?.primaryValue ?? item?.chaosValue ?? item?.value ?? 0);
+
+const getVolume = (item) =>
+  item?.volumePrimaryValue ?? item?.listingCount ?? item?.count ?? null;
+
 function showToast(message) {
-  if (!elements.toast) return;
-
   elements.toast.textContent = message;
   elements.toast.classList.add("show");
 
@@ -64,17 +79,14 @@ function showToast(message) {
   }, 2600);
 }
 
-// Display loading and error messages.
 function showPanel(container, message, isError = false) {
-  if (!container) return;
-
-  const className = isError ? "error-panel" : "loading-panel";
-
-  container.innerHTML =
-    `<div class="${className}">${escapeHTML(message)}</div>`;
+  container.innerHTML = `
+    <div class="${isError ? "error-panel" : "loading-panel"}">
+      ${message}
+    </div>
+  `;
 }
 
-// Escape text before inserting API values into HTML.
 function escapeHTML(value = "") {
   return String(value).replace(/[&<>"']/g, character => ({
     "&": "&amp;",
@@ -85,188 +97,76 @@ function escapeHTML(value = "") {
   })[character]);
 }
 
-// Format numbers for the market cards.
 function formatNumber(value, maximumFractionDigits = 2) {
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) return "—";
-
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits
-  }).format(number);
-}
-
-// Handle different possible API response formats.
-function getEntries(data) {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.lines)) return data.lines;
-  if (Array.isArray(data?.results)) return data.results;
-
-  return [];
-}
-
-function getLeagueName(league) {
-  return league?.name || league?.id || "Unknown league";
-}
-
-function getName(item) {
-  return item?.name ||
-    item?.currencyTypeName ||
-    item?.baseType ||
-    "Unknown";
-}
-
-function getValue(item) {
-  return Number(
-    item?.primaryValue ??
-    item?.chaosValue ??
-    item?.value ??
-    0
-  );
-}
-
-function getVolume(item) {
-  return item?.volumePrimaryValue ??
-    item?.listingCount ??
-    item?.count ??
-    null;
-}
-
-/*
- * Currency prices and currency names are stored separately
- * in the poe.ninja API response.
- *
- * This function matches them using their IDs.
- */
-function normalizeCurrencies(data) {
-  const lines = getEntries(data);
-  const rawItems = data?.core?.items ?? [];
-
-  const metadata = new Map();
-
-  if (Array.isArray(rawItems)) {
-    rawItems.forEach(item => {
-      if (item?.id !== undefined) {
-        metadata.set(String(item.id), item);
-      }
-    });
-  } else if (rawItems && typeof rawItems === "object") {
-    Object.entries(rawItems).forEach(([id, item]) => {
-      metadata.set(String(id), item);
-    });
-  }
-
-  const primary = data?.core?.primary;
-
-  currencyUnit = typeof primary === "string"
-    ? primary
-    : primary?.name || primary?.currencyTypeName || "primary currency";
-
-  return lines.map(line => {
-    const details = metadata.get(String(line.id)) || {};
-
-    return {
-      ...details,
-      ...line,
-
-      name:
-        details.name ||
-        details.currencyTypeName ||
-        line.name ||
-        line.currencyTypeName ||
-        String(line.id),
-
-      icon:
-        details.icon ||
-        details.image ||
-        line.icon ||
-        line.image ||
-        "",
-
-      primaryValue: Number(line.primaryValue ?? 0),
-
-      volumePrimaryValue: line.volumePrimaryValue ?? null
-    };
-  });
+  }).format(value);
 }
 
 // Load available leagues.
 function loadLeagues() {
-  return fetchJSON(`${API_ROOT}/leagues`).then(data => {
-    leagueList = getEntries(data);
+  return fetchJSON(LEAGUES_URL)
+    .then(data => {
+      leagueList = getEntries(data);
 
-    if (!leagueList.length) {
-      throw new Error("No active leagues were returned.");
-    }
+      if (!leagueList.length && Array.isArray(data)) {
+        leagueList = data;
+      }
 
-    elements.league.innerHTML = leagueList.map((league, index) => {
-      const id = league.id || league.name;
+      if (!leagueList.length) {
+        throw new Error("The API returned no league entries.");
+      }
 
-      return `
-        <option value="${escapeHTML(id)}"
-          ${index === 0 ? "selected" : ""}>
-          ${escapeHTML(getLeagueName(league))}
-        </option>
-      `;
-    }).join("");
+      elements.league.innerHTML = leagueList.map((league, index) => {
+        const id = league.id || league.name || league.league;
 
-    const selectedLeague = leagueList[0];
+        return `
+          <option value="${escapeHTML(id)}" ${index === 0 ? "selected" : ""}>
+            ${escapeHTML(getLeagueName(league))}
+          </option>
+        `;
+      }).join("");
 
-    elements.summaryLeague.textContent =
-      getLeagueName(selectedLeague);
+      const selected = leagueList[0];
 
-    return selectedLeague;
-  });
+      elements.summaryLeague.textContent = getLeagueName(selected);
+
+      return selected;
+    });
 }
 
-// Build the currency API URL.
+// Build the currency API URL through the Worker.
 function buildCurrencyURL(leagueId) {
   const params = new URLSearchParams({
     league: leagueId,
     type: "Currency"
   });
 
-  return `${API_ROOT}/exchange/current/overview?${params}`;
+  return `${API_BASE}/poe2/api/economy/exchange/current/overview?${params}`;
 }
 
-// Convert older/simpler dropdown values to valid PoE 2 categories.
-function getItemCategory(value) {
-  const aliases = {
-    "UniqueWeapon": "UniqueWeapons",
-    "UniqueArmour": "UniqueArmours",
-    "UniqueAccessory": "UniqueAccessories",
-    "UniqueFlask": "UniqueFlasks",
-    "UniqueJewel": "UniqueJewels",
-    "UniqueSanctumRelic": "UniqueSanctumRelics",
-    "UniqueTablet": "UniqueTablets"
-  };
-
-  return aliases[value] || value;
-}
-
-// Build the unique item API URL.
+// Build the item API URL through the Worker.
 function buildItemURL(leagueId, itemType) {
   const params = new URLSearchParams({
     league: leagueId,
-    type: getItemCategory(itemType)
+    type: itemType
   });
 
-  return `${API_ROOT}/stash/current/item/overview?${params}`;
+  return `${API_BASE}/poe2/api/economy/stash/current/item/overview?${params}`;
 }
 
-// Load currency market data.
+// Load currency data.
 function loadCurrencies(leagueId) {
-  showPanel(
-    elements.currencyGrid,
-    "Consulting the market records…"
-  );
+  showPanel(elements.currencyGrid, "Consulting the market records…");
 
   return fetchJSON(buildCurrencyURL(leagueId))
     .then(data => {
-      currencyData = normalizeCurrencies(data);
+      currencyData = getEntries(data);
 
-      elements.summaryCurrencies.textContent =
-        formatNumber(currencyData.length, 0);
+      elements.summaryCurrencies.textContent = formatNumber(
+        currencyData.length,
+        0
+      );
 
       renderCurrencies();
       populateCurrencySelects();
@@ -277,7 +177,7 @@ function loadCurrencies(leagueId) {
     .catch(error => {
       showPanel(
         elements.currencyGrid,
-        `Unable to load currency data: ${error.message}`,
+        `Unable to load currency data: ${escapeHTML(error.message)} Check the API documentation or browser console.`,
         true
       );
 
@@ -285,19 +185,18 @@ function loadCurrencies(leagueId) {
     });
 }
 
-// Load unique item market data.
+// Load item data.
 function loadItems(leagueId, itemType = elements.itemType.value) {
-  showPanel(
-    elements.itemGrid,
-    "Gathering unique item prices…"
-  );
+  showPanel(elements.itemGrid, "Gathering unique items…");
 
   return fetchJSON(buildItemURL(leagueId, itemType))
     .then(data => {
       itemData = getEntries(data);
 
-      elements.summaryItems.textContent =
-        formatNumber(itemData.length, 0);
+      elements.summaryItems.textContent = formatNumber(
+        itemData.length,
+        0
+      );
 
       renderItems();
 
@@ -306,7 +205,7 @@ function loadItems(leagueId, itemType = elements.itemType.value) {
     .catch(error => {
       showPanel(
         elements.itemGrid,
-        `Unable to load item data: ${error.message}`,
+        `Unable to load item data: ${escapeHTML(error.message)} Check the API documentation or browser console.`,
         true
       );
 
@@ -314,11 +213,9 @@ function loadItems(leagueId, itemType = elements.itemType.value) {
     });
 }
 
-// Display currency cards.
+// Display currencies.
 function renderCurrencies() {
-  const query = elements.currencySearch.value
-    .trim()
-    .toLowerCase();
+  const query = elements.currencySearch.value.trim().toLowerCase();
 
   let visible = currencyData.filter(item =>
     getName(item).toLowerCase().includes(query)
@@ -337,150 +234,98 @@ function renderCurrencies() {
   });
 
   if (!visible.length) {
-    showPanel(
-      elements.currencyGrid,
-      "No currencies match your search."
-    );
-
+    showPanel(elements.currencyGrid, "No currencies match your search.");
     return;
   }
 
-  elements.currencyGrid.innerHTML = visible
-    .slice(0, 32)
-    .map(item => {
-      const name = getName(item);
-      const icon = item.icon || "";
-      const value = getValue(item);
-      const volume = getVolume(item);
+  elements.currencyGrid.innerHTML = visible.slice(0, 32).map(item => {
+    const name = getName(item);
+    const icon = getIcon(item);
+    const value = getValue(item);
+    const volume = getVolume(item);
 
-      return `
-        <article class="currency-card" data-spring-card>
+    return `
+      <article class="currency-card" data-spring-card>
+        ${
+          icon
+            ? `<img class="currency-icon" src="${escapeHTML(icon)}" alt="" loading="lazy">`
+            : `<span class="currency-icon currency-placeholder" aria-hidden="true">✦</span>`
+        }
 
-          ${
-            icon
-              ? `<img class="currency-icon"
-                  src="${escapeHTML(icon)}"
-                  alt=""
-                  loading="lazy">`
-              : `<span class="currency-icon currency-placeholder"
-                  aria-hidden="true">✦</span>`
-          }
+        <div class="currency-info">
+          <div class="currency-name">${escapeHTML(name)}</div>
 
-          <div class="currency-info">
-
-            <div class="currency-name">
-              ${escapeHTML(name)}
-            </div>
-
-            <div class="currency-value">
-              ${formatNumber(value)} ${escapeHTML(currencyUnit)}
-            </div>
-
-            <div class="currency-volume">
-              ${
-                volume !== null
-                  ? `Market volume: ${formatNumber(volume)} ${escapeHTML(currencyUnit)}`
-                  : "Current market listing"
-              }
-            </div>
-
+          <div class="currency-value">
+            ${formatNumber(value)} chaos value
           </div>
-        </article>
-      `;
-    })
-    .join("");
 
-  document.dispatchEvent(
-    new CustomEvent("currency-cards-rendered")
-  );
+          <div class="currency-volume">
+            ${
+              volume !== null
+                ? `Market volume: ${formatNumber(Number(volume))}`
+                : "Current market listing"
+            }
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  document.dispatchEvent(new CustomEvent("currency-cards-rendered"));
 }
 
-// Display unique item cards.
+// Display items.
 function renderItems() {
-  const query = elements.itemSearch.value
-    .trim()
-    .toLowerCase();
+  const query = elements.itemSearch.value.trim().toLowerCase();
 
   const visible = itemData.filter(item => {
     const name = getName(item).toLowerCase();
-
-    const base = String(item.baseType || "")
-      .toLowerCase();
+    const base = String(item.baseType || "").toLowerCase();
 
     return name.includes(query) || base.includes(query);
   });
 
   if (!visible.length) {
-    showPanel(
-      elements.itemGrid,
-      "No items match your search."
-    );
-
+    showPanel(elements.itemGrid, "No items match your search.");
     return;
   }
 
-  elements.itemGrid.innerHTML = visible
-    .slice(0, 18)
-    .map(item => {
-      const name = getName(item);
-      const icon = item.icon || "";
-      const base = item.baseType || item.category || "Unique item";
-      const price = getValue(item);
+  elements.itemGrid.innerHTML = visible.slice(0, 18).map(item => {
+    const name = getName(item);
+    const icon = getIcon(item);
+    const base = item.baseType || item.itemClass || "Unique item";
+    const price = getValue(item);
 
-      return `
-        <article class="item-card" data-spring-card>
+    return `
+      <article class="item-card" data-spring-card>
+        ${
+          icon
+            ? `<img class="item-icon" src="${escapeHTML(icon)}" alt="" loading="lazy">`
+            : ""
+        }
 
-          ${
-            icon
-              ? `<img class="item-icon"
-                  src="${escapeHTML(icon)}"
-                  alt=""
-                  loading="lazy">`
-              : ""
-          }
+        <div>
+          <div class="item-name">${escapeHTML(name)}</div>
 
-          <div>
-
-            <div class="item-name">
-              ${escapeHTML(name)}
-            </div>
-
-            <div class="item-base">
-              ${escapeHTML(base)}
-            </div>
-
-            <div class="item-price">
-              ${formatNumber(price)} ${escapeHTML(currencyUnit)}
-            </div>
-
-            ${
-              item.listingCount !== undefined
-                ? `<div class="item-base">
-                    ${formatNumber(item.listingCount, 0)} listings
-                  </div>`
-                : ""
-            }
-
+          <div class="item-base">
+            ${escapeHTML(base)}
           </div>
-        </article>
-      `;
-    })
-    .join("");
 
-  document.dispatchEvent(
-    new CustomEvent("currency-cards-rendered")
-  );
+          <div class="item-price">
+            ${formatNumber(price)} chaos value
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  document.dispatchEvent(new CustomEvent("currency-cards-rendered"));
 }
 
-// Populate the currency calculator dropdowns.
+// Populate currency dropdowns for the calculator.
 function populateCurrencySelects() {
-  const previousFrom = elements.from.value;
-  const previousTo = elements.to.value;
-
   const options = [...currencyData]
-    .sort((a, b) =>
-      getName(a).localeCompare(getName(b))
-    )
+    .sort((a, b) => getName(a).localeCompare(getName(b)))
     .map(item => `
       <option value="${escapeHTML(getName(item))}">
         ${escapeHTML(getName(item))}
@@ -488,31 +333,39 @@ function populateCurrencySelects() {
     `)
     .join("");
 
-  elements.from.innerHTML =
-    `<option value="">Choose currency</option>${options}`;
+  const previousFrom = elements.from.value;
+  const previousTo = elements.to.value;
 
-  elements.to.innerHTML =
-    `<option value="">Choose currency</option>${options}`;
+  elements.from.innerHTML = `
+    <option value="">Choose currency</option>
+    ${options}
+  `;
+
+  elements.to.innerHTML = `
+    <option value="">Choose currency</option>
+    ${options}
+  `;
 
   if (currencyData.length > 1) {
-    elements.from.value = getName(currencyData[0]);
-    elements.to.value = getName(currencyData[1]);
+    elements.from.value = currencyData[0]
+      ? getName(currencyData[0])
+      : "";
+
+    elements.to.value = currencyData[1]
+      ? getName(currencyData[1])
+      : "";
   }
 
-  if ([...elements.from.options].some(option =>
-    option.value === previousFrom
-  )) {
+  if ([...elements.from.options].some(option => option.value === previousFrom)) {
     elements.from.value = previousFrom;
   }
 
-  if ([...elements.to.options].some(option =>
-    option.value === previousTo
-  )) {
+  if ([...elements.to.options].some(option => option.value === previousTo)) {
     elements.to.value = previousTo;
   }
 }
 
-// Calculate the exchange rate between two currencies.
+// Calculate estimated currency conversion.
 function updateCalculator() {
   const amount = Number(elements.amount.value);
 
@@ -535,14 +388,13 @@ function updateCalculator() {
     return;
   }
 
-  const converted =
-    amount * getValue(fromItem) / getValue(toItem);
+  // Values are normalized against the API's common value field.
+  const converted = amount * getValue(fromItem) / getValue(toItem);
 
-  elements.result.textContent =
-    formatNumber(converted, 4);
+  elements.result.textContent = formatNumber(converted, 4);
 }
 
-// Refresh both market sections.
+// Refresh all market data.
 function refreshMarket() {
   const leagueId = elements.league.value;
 
@@ -572,7 +424,7 @@ function refreshMarket() {
 function initialize() {
   loadLeagues()
     .then(league => {
-      const leagueId = league.id || league.name;
+      const leagueId = league.id || league.name || league.league;
 
       return Promise.allSettled([
         loadCurrencies(leagueId),
@@ -580,16 +432,16 @@ function initialize() {
       ]);
     })
     .then(() => {
-      elements.lastUpdated.textContent =
-        new Date().toLocaleTimeString();
+      elements.lastUpdated.textContent = new Date().toLocaleTimeString();
     })
     .catch(error => {
-      elements.league.innerHTML =
-        `<option value="">League data unavailable</option>`;
+      elements.league.innerHTML = `
+        <option value="">League data unavailable</option>
+      `;
 
       showPanel(
         elements.currencyGrid,
-        `Could not load league data: ${error.message}`,
+        `Could not load league data: ${escapeHTML(error.message)}. Check the Cloudflare Worker connection.`,
         true
       );
 
@@ -603,44 +455,23 @@ function initialize() {
     });
 }
 
-// Search and sorting events.
-elements.currencySearch.addEventListener(
-  "input",
-  renderCurrencies
-);
+// Event listeners.
+elements.currencySearch.addEventListener("input", renderCurrencies);
 
-elements.currencySort.addEventListener(
-  "change",
-  renderCurrencies
-);
+elements.currencySort.addEventListener("change", renderCurrencies);
 
-elements.itemSearch.addEventListener(
-  "input",
-  renderItems
-);
+elements.itemSearch.addEventListener("input", renderItems);
 
-// Item category selection.
 elements.itemType.addEventListener("change", () => {
   if (elements.league.value) {
-    loadItems(
-      elements.league.value,
-      elements.itemType.value
-    ).catch(() => {});
+    loadItems(elements.league.value, elements.itemType.value).catch(() => {});
   }
 });
 
-// League and refresh events.
-elements.league.addEventListener(
-  "change",
-  refreshMarket
-);
+elements.league.addEventListener("change", refreshMarket);
 
-elements.refresh.addEventListener(
-  "click",
-  refreshMarket
-);
+elements.refresh.addEventListener("click", refreshMarket);
 
-// Calculator events.
 [elements.amount, elements.from, elements.to].forEach(control => {
   control.addEventListener("input", updateCalculator);
   control.addEventListener("change", updateCalculator);
