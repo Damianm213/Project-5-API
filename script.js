@@ -1,6 +1,6 @@
 /*
  * Wraeclast Market
- * Path of Exile 2 market tracker
+ * Path of Exile 2 Economy Tracker
  */
 
 const API_BASE = "https://wraeclast-market-api.daawesomeone1.workers.dev";
@@ -31,7 +31,7 @@ let currencyData = [];
 let itemData = [];
 let toastTimer;
 
-// Fetch API data.
+// Fetch JSON data.
 const fetchJSON = (url) =>
   fetch(url, {
     headers: { Accept: "application/json" }
@@ -39,6 +39,7 @@ const fetchJSON = (url) =>
     if (!response.ok) {
       throw new Error(`Request failed (${response.status}).`);
     }
+
     return response.json();
   });
 
@@ -47,13 +48,12 @@ const getEntries = (data) => {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.lines)) return data.lines;
   if (Array.isArray(data?.results)) return data.results;
+
   return [];
 };
 
 const getLeagueName = (league) =>
   league?.name || league?.id || league?.league || "Unknown league";
-
-const getIcon = (item) => item?.icon || item?.image || "";
 
 const getName = (item) =>
   item?.name || item?.currencyTypeName || item?.baseType || "Unknown";
@@ -63,6 +63,23 @@ const getValue = (item) =>
 
 const getVolume = (item) =>
   item?.volumePrimaryValue ?? item?.listingCount ?? item?.count ?? null;
+
+// Convert API image paths into usable image URLs.
+function getIcon(item) {
+  const icon = item?.icon || item?.image || "";
+
+  if (!icon) return "";
+
+  if (icon.startsWith("https://") || icon.startsWith("http://")) {
+    return icon;
+  }
+
+  if (icon.startsWith("//")) {
+    return `https:${icon}`;
+  }
+
+  return `https://web.poecdn.com${icon.startsWith("/") ? "" : "/"}${icon}`;
+}
 
 // Display notifications.
 function showToast(message) {
@@ -128,6 +145,7 @@ function loadLeagues() {
       }).join("");
 
       const selected = leagueList[0];
+
       elements.summaryLeague.textContent = getLeagueName(selected);
 
       return selected;
@@ -154,52 +172,33 @@ function buildItemURL(leagueId, itemType) {
   return `${API_BASE}/poe2/api/economy/stash/current/item/overview?${params}`;
 }
 
-// Load currencies.
+// Load currency data.
 function loadCurrencies(leagueId) {
   showPanel(elements.currencyGrid, "Consulting the market records…");
 
   return fetchJSON(buildCurrencyURL(leagueId))
     .then(data => {
-      const core = data?.core || {};
-      const currencyItems = core.items || [];
-      const rates = core.rates || {};
+      const currencyItems = data?.core?.items || [];
+      const priceLines = data?.lines || [];
 
-      const primary = core.primary;
-      const secondary = core.secondary;
+      // Match currency metadata with its market price using the ID.
+      const currencyLookup = new Map(
+        currencyItems.map(item => [String(item.id), item])
+      );
 
-      /*
-       * The API's core.items contains currency names and images.
-       * The API's core.rates contains exchange-rate information.
-       * The lines array contains item listings, not currency metadata.
-       */
+      currencyData = priceLines
+        .filter(line => currencyLookup.has(String(line.id)))
+        .map(line => {
+          const metadata = currencyLookup.get(String(line.id));
 
-      currencyData = currencyItems.map(currency => {
-        let chaosValue = null;
-
-        if (currency.id === secondary) {
-          chaosValue = 1;
-        } else if (
-          currency.id === primary &&
-          Number(rates[secondary]) > 0
-        ) {
-          chaosValue = Number(rates[secondary]);
-        } else if (
-          Number(rates[currency.id]) > 0 &&
-          Number(rates[secondary]) > 0
-        ) {
-          chaosValue =
-            Number(rates[secondary]) /
-            Number(rates[currency.id]);
-        }
-
-        return {
-          ...currency,
-          name: currency.name,
-          icon: currency.image,
-          primaryValue: chaosValue,
-          volumePrimaryValue: null
-        };
-      });
+          return {
+            ...line,
+            name: metadata.name,
+            icon: getIcon(metadata),
+            primaryValue: Number(line.primaryValue) || 0,
+            volumePrimaryValue: Number(line.volumePrimaryValue) || 0
+          };
+        });
 
       elements.summaryCurrencies.textContent = formatNumber(
         currencyData.length,
@@ -223,7 +222,7 @@ function loadCurrencies(leagueId) {
     });
 }
 
-// Load items.
+// Load item data.
 function loadItems(leagueId, itemType = elements.itemType.value) {
   showPanel(elements.itemGrid, "Gathering unique items…");
 
@@ -267,8 +266,8 @@ function renderCurrencies() {
     }
 
     return sortMode === "value-asc"
-      ? (getValue(a) || 0) - (getValue(b) || 0)
-      : (getValue(b) || 0) - (getValue(a) || 0);
+      ? getValue(a) - getValue(b)
+      : getValue(b) - getValue(a);
   });
 
   if (!visible.length) {
@@ -280,12 +279,19 @@ function renderCurrencies() {
     const name = getName(item);
     const icon = getIcon(item);
     const value = getValue(item);
+    const volume = getVolume(item);
 
     return `
       <article class="currency-card" data-spring-card>
         ${
           icon
-            ? `<img class="currency-icon" src="${escapeHTML(icon.startsWith("/") ? "https://poe.ninja" + icon : icon)}" alt="" loading="lazy">`
+            ? `<img
+                class="currency-icon"
+                src="${escapeHTML(icon)}"
+                alt="${escapeHTML(name)}"
+                loading="lazy"
+                onerror="this.style.display='none'"
+              >`
             : `<span class="currency-icon currency-placeholder" aria-hidden="true">✦</span>`
         }
 
@@ -293,15 +299,15 @@ function renderCurrencies() {
           <div class="currency-name">${escapeHTML(name)}</div>
 
           <div class="currency-value">
-            ${
-              Number.isFinite(value) && value > 0
-                ? `${formatNumber(value)} chaos value`
-                : "Price unavailable"
-            }
+            ${formatNumber(value)} chaos value
           </div>
 
           <div class="currency-volume">
-            Market exchange rate
+            ${
+              volume !== null
+                ? `Market volume: ${formatNumber(Number(volume))}`
+                : "Market volume unavailable"
+            }
           </div>
         </div>
       </article>
@@ -337,7 +343,7 @@ function renderItems() {
       <article class="item-card" data-spring-card>
         ${
           icon
-            ? `<img class="item-icon" src="${escapeHTML(icon)}" alt="" loading="lazy">`
+            ? `<img class="item-icon" src="${escapeHTML(icon)}" alt="${escapeHTML(name)}" loading="lazy">`
             : ""
         }
 
